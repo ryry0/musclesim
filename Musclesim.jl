@@ -2,15 +2,9 @@ module MuscleSim
 
 type HillMuscleModel
     # Activation constants
-    t_initial::Float64
-    t_final::Float64
     dt::Float64
     tau::Float64
     beta::Float64
-
-    # Initial length and force
-    L_initial::Float64
-    F_initial::Float64
 
     # Maximum muscle velocity and force
     V_max::Float64
@@ -36,18 +30,14 @@ type HillMuscleModel
     excitation_func
 end
 
-function CreateModel(;t_initial = 0.0, t_final = 0.0, dt = 0.0, tau = 0.0,
-                     beta = 0.0, L_initial = 0.0, F_initial = 0.0, V_max = 0.0,
-                     F_max = 0.0, L_max = 0.0, K_t = 0.0, L_st = 0.0,
-                     L_mt::Vector{Float64} = [], V_mt::Vector{Float64} = [], excitation_func = excite)
-    return model = HillMuscleModel(
-        t_initial,
-        t_final,
+function CreateModel(;dt = 0.0, tau = 0.0, beta = 0.0, V_max = 0.0, F_max = 0.0,
+                     L_max = 0.0, K_t = 0.0, L_st = 0.0, L_mt::Vector{Float64} =
+                     [], V_mt::Vector{Float64} = [], time::Vector{Float64} = [],
+                     excitation_func = excite)
+return model = HillMuscleModel(
         dt,
         tau,
         beta,
-        L_initial,
-        F_initial,
         V_max,
         F_max,
         L_max,
@@ -59,7 +49,7 @@ function CreateModel(;t_initial = 0.0, t_final = 0.0, dt = 0.0, tau = 0.0,
         [], # norm_L_m
         [], # V_m
         [], # a
-        [], # time
+        time, # time
         excitation_func)
 end
 
@@ -78,7 +68,6 @@ function Int4(u::Vector{Float64}, du, t, dt)
     C = 2.0/11.0
     D = 6.0/11.0
 
-    print(length(u))
     # U = A*u[n-1] + B*[n-2] + C*[n-3] + D*du*dt
     return U = A*u[end-1] + B*u[end-2] + C*u[end-3] + D*du(t, u[end])*dt
 end
@@ -91,16 +80,17 @@ end
 
 function excite(t::Float64)
     T0 = 0.5
-    T1 = 1
-    LVL = 0.5
+    T1 = 2
+    HIGH = 0.5
+    LOW = 0.01
     ret = 0
     if t > T1
-        return 0
+        return LOW
     end
     if t > T0
-        return LVL
+        return HIGH
     end
-    return 0
+    return LOW
 end
 
 #norm_length_tension :: norm_length -> norm_force
@@ -133,18 +123,18 @@ function calcL_m(L_st, K_t, F_m)
     return L_st + F_m/K_t
 end
 
-function interp_activation(model::HillMuscleModel, t::Float64)
+function interp(x_basis::Vector{Float64}, y_basis::Vector{Float64}, t::Float64)
     #print("time $t\n")
-    next_index = findfirst(x -> x > t, model.time)
-    if t >= model.time[end]
-        next_index = length(model.time)
+    next_index = findfirst(x -> x > t, x_basis)
+    if t >= x_basis[end]
+        next_index = length(x_basis)
     end
     prev_index = next_index -1
-    nearest_time = model.time[prev_index]
+    nearest_time = x_basis[prev_index]
     #=
     print("nearest time $nearest_time\n")
     =#
-    avg_constant = t - model.time[prev_index]
+    avg_constant = t - x_basis[prev_index]
 
     #=
     print("avg_constant ")
@@ -158,7 +148,7 @@ function interp_activation(model::HillMuscleModel, t::Float64)
     print(1- avg_constant)
     print("\n")
     =#
-    out = (1 - avg_constant)*model.activation[prev_index] + avg_constant*model.activation[next_index]
+    out = (1 - avg_constant)*y_basis[prev_index] + avg_constant*y_basis[next_index]
 
     #=
     print("out ")
@@ -169,14 +159,28 @@ function interp_activation(model::HillMuscleModel, t::Float64)
     return out
 end
 
+
+function interp_activation(model::HillMuscleModel, t::Float64)
+    return interp(model.time, model.activation, t);
+end
+
+function interp_length(model::HillMuscleModel, t::Float64)
+    return interp(model.time, model.L_mt, t);
+end
+
+function interp_velocity(model::HillMuscleModel, t::Float64)
+    return interp(model.time, model.V_mt, t);
+end
+
 function calcF_mdot(model::HillMuscleModel, t, F_m)
-    norm_L_m = (model.L_mt[1] - F_m/model.K_t - model.L_st)/model.L_max
+    norm_L_m = (interp_length(model, t) - F_m/model.K_t - model.L_st)/model.L_max
     y =
         F_m/(model.F_max * interp_activation(model, t) * norm_length_tension(norm_L_m))
+    #print("$norm_L_m\n")
 
     V_m = model.V_max*norm_inv_fv(y)
 
-    V_t = model.V_mt[1] - V_m
+    V_t = interp_velocity(model, t) - V_m
     return F_mdot = model.K_t*V_t
 end
 
@@ -187,21 +191,19 @@ function gen_activation!(model::HillMuscleModel)
 
     model.activation =
         foldl((acc, t) ->
-            vcat(acc, RK4(acc[end], a_dot, t, model.dt)), model.time) # integrate
+            vcat(acc, RK4(acc[end], a_dot, t, model.dt)), 
+                model.excitation_func(model.time[1]), model.time) # integrate
 
     model.activation =
-        collect(Iterators.take(model.activation, length(model.time))) # model stuff
+        collect(Iterators.take(model.activation, length(model.time)))
 end
 
 function simulate(model::HillMuscleModel)
-    model.time = collect(model.t_initial:model.dt:model.t_final)
     gen_activation!(model)
-    #=
     F_m_dot = (t, F_m) -> calcF_mdot(model, t, F_m)
     model.F_m =
         foldl((acc, t) ->
             vcat(acc, RK4(acc[end], F_m_dot, t, model.dt)), model.time)
-        =#
 end
 
 end
