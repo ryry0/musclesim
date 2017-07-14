@@ -24,6 +24,7 @@ type HillMuscleModel
     norm_L_m::Vector{Float64}
     V_m::Vector{Float64}
     activation::Vector{Float64}
+    excitation::Vector{Float64}
     time::Vector{Float64}
 
     # function of time that describes the excitation
@@ -49,6 +50,7 @@ return model = HillMuscleModel(
         [], # norm_L_m
         [], # V_m
         [], # a
+        [],
         time, # time
         excitation_func)
 end
@@ -176,15 +178,27 @@ function calcF_mdot(model::HillMuscleModel, t, F_m)
     norm_L_m = (interp_length(model, t) - F_m/model.K_t - model.L_st)/model.L_max
     y =
         F_m/(model.F_max * interp_activation(model, t) * norm_length_tension(norm_L_m))
-    #print("$norm_L_m\n")
 
     V_m = model.V_max*norm_inv_fv(y)
 
     V_t = interp_velocity(model, t) - V_m
+
+    print("F_m $F_m\n")
+    print("numerator ")
+    print(interp_length(model, t) - F_m/model.K_t - model.L_st)
+    print("\n")
+    print("norm Lm $norm_L_m\n")
+    print("y $y\n")
+    print("norm_inf_fvy $(norm_inv_fv(y))\n")
+    print("V_m $V_m\n")
+    print("V_t $V_t\n")
+    print("\n")
+
     return F_mdot = model.K_t*V_t
 end
 
 function gen_activation!(model::HillMuscleModel)
+    model.excitation = map(model.excitation_func, model.time)
     a_dot =
         (t, a) ->
             audot(t, model.excitation_func, a, tau=model.tau, beta=model.beta)
