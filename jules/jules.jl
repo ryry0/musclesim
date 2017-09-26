@@ -231,7 +231,7 @@ function idft(X)
 end
 
 
-function RK4(u::Float64, du, t::Float64, dt::Float64)
+function RK4(u, du, t::Float64, dt::Float64)
     k1 = du(t, u)
     k2 = du(t + dt/2, u + dt/2*k1)
     k3 = du(t + dt/2, u + dt/2*k2)
@@ -248,6 +248,28 @@ function Int4(u::Vector{Float64}, du, t, dt)
 
     # U = A*u[n-1] + B*[n-2] + C*[n-3] + D*du*dt
     return U = A*u[end-1] + B*u[end-2] + C*u[end-3] + D*du(t, u[end])*dt
+end
+
+function adams_bashforth_moulton(u::Float64, prev_du::Vector{Float64}, du, t::Float64, dt::Float64)
+        f_k = du(t, u)
+        predictor =  u + dt/24 * (-9*prev_u[end-2] + 37*prev_u[end-1] - 59*prev_du[end] + 55*f_k)
+        corrector = u + dt/24 * (prev_u[end-1] - 4*prev_u[end] + 19*f_k + 9*du(t+dt, predictor))
+        return corrector
+end
+
+function integ(method)
+end
+
+function constrain(a::Float64, lower_bound::Float64, upper_bound::Float64)
+    if a > upper_bound
+        return upper_bound
+    end
+
+    if a < lower_bound
+        return lower_bound
+    end
+        
+    return a
 end
 
 function interp(x_basis::Vector{Float64}, y_basis::Vector{Float64}, t::Float64)
