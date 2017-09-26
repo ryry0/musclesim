@@ -1,4 +1,6 @@
 module MuscleSim
+include("jules/Jules.jl")
+js = Jules
 
 type HillMuscleModel
     # Activation constants
@@ -47,7 +49,7 @@ return model = HillMuscleModel(
         K_t,
         K_sp,
         L_st,
-        L_load,
+        #L_load,
         L_mt_init,
         L_total,
         zeros(length(time)),
@@ -59,25 +61,6 @@ return model = HillMuscleModel(
         [],
         time, # time
         excitation_func)
-end
-
-function RK4(u::Float64, du, t::Float64, dt::Float64)
-    k1 = du(t, u)
-    k2 = du(t + dt/2, u + dt/2*k1)
-    k3 = du(t + dt/2, u + dt/2*k2)
-    k4 = du(t + dt, u + dt*k3)
-    dU = k1 + 2*k2 + 2*k2 + k4
-    return U = u + dU*dt/6.0
-end
-
-function Int4(u::Vector{Float64}, du, t, dt)
-    A = 18.0/11.0
-    B = -9.0/11.0
-    C = 2.0/11.0
-    D = 6.0/11.0
-
-    # U = A*u[n-1] + B*[n-2] + C*[n-3] + D*du*dt
-    return U = A*u[end-1] + B*u[end-2] + C*u[end-3] + D*du(t, u[end])*dt
 end
 
 #audot :: t -> (t -> b) -> b -> b
@@ -135,53 +118,16 @@ function calcL_m(L_st, K_t, F_m)
     return L_st + F_m/K_t
 end
 
-function interp(x_basis::Vector{Float64}, y_basis::Vector{Float64}, t::Float64)
-    #print("time $t\n")
-    next_index = findfirst(x -> x > t, x_basis)
-    if t >= x_basis[end]
-        next_index = length(x_basis)
-    end
-    prev_index = next_index -1
-    nearest_time = x_basis[prev_index]
-    #=
-    print("nearest time $nearest_time\n")
-    =#
-    avg_constant = t - x_basis[prev_index]
-
-    #=
-    print("avg_constant ")
-    print(avg_constant)
-    print("\n")
-
-    print("1 -avg_constant ")
-    print(1- avg_constant)
-    print("\n")
-    print("1 -avg_constant ")
-    print(1- avg_constant)
-    print("\n")
-    =#
-    out = (1 - avg_constant)*y_basis[prev_index] + avg_constant*y_basis[next_index]
-
-    #=
-    print("out ")
-    print(out)
-    print("\n\n")
-    =#
-
-    return out
-end
-
-
 function interp_activation(model::HillMuscleModel, t::Float64)
-    return interp(model.time, model.activation, t);
+    return js.interp(model.time, model.activation, t);
 end
 
 function interp_length(model::HillMuscleModel, t::Float64)
-    return interp(model.time, model.L_mt, t);
+    return js.interp(model.time, model.L_mt, t);
 end
 
 function interp_velocity(model::HillMuscleModel, t::Float64)
-    return interp(model.time, model.V_mt, t);
+    return js.interp(model.time, model.V_mt, t);
 end
 
 function calcF_mdot(model::HillMuscleModel, t, F_m, V_mt)
@@ -229,7 +175,7 @@ function gen_activation!(model::HillMuscleModel)
 
     model.activation = # integrate to form activation
         foldl((acc, t) ->
-            vcat(acc, RK4(acc[end], a_dot, t, model.dt)), 
+            vcat(acc, js.RK4(acc[end], a_dot, t, model.dt)), 
                 model.excitation_func(model.time[1]), model.time) # integrate
 
     model.activation =
@@ -243,7 +189,7 @@ function simulate(model::HillMuscleModel)
     #=
     model.F_m =
         foldl((acc, t) ->
-            vcat(acc, RK4(acc[end], F_m_dot, t, model.dt)), model.time)
+            vcat(acc, js.RK4(acc[end], F_m_dot, t, model.dt)), model.time)
         =#
 
     model.L_mt[1] = model.L_mt_init
@@ -251,7 +197,7 @@ function simulate(model::HillMuscleModel)
     # take initial stab at calculating F_m
     temp_force = collect(0:0.01:2)
     temp_vel = map(norm_inv_fv, temp_force)
-    FV = interp(temp_vel, temp_force, 0.0)
+    FV = js.interp(temp_vel, temp_force, 0.0)
     activation = interp_activation(model, model.time[1])
 
     model.F_m[1] = 
@@ -260,7 +206,7 @@ function simulate(model::HillMuscleModel)
     model.V_mt[1] = 0.0
 
     for i in 1:length(model.time)-1
-    model.F_m[i+1] = RK4(model.F_m[i], (t, F_m) -> calcF_mdot(model, t, F_m, model.V_mt[i]), model.time[i], model.dt)
+    model.F_m[i+1] = js.RK4(model.F_m[i], (t, F_m) -> calcF_mdot(model, t, F_m, model.V_mt[i]), model.time[i], model.dt)
 
     model.V_mt[i+1] = calcF_mdot(model, model.time[i], model.F_m[i], model.V_mt[i])/model.K_sp
 
@@ -274,4 +220,3 @@ function simulate(model::HillMuscleModel)
 end
 
 end
-ms = MuscleSim
