@@ -193,9 +193,10 @@ end
 # Model params -> activation -> muscle force -> mucle length -> muscle velocity
 function calcMuscleVelocity(model::HillMuscleModel, activation, F_m, L_m)
     y = F_m/(model.F_max * activation * norm_length_tension(L_m/model.L_optimal))
-    print_debug("y $y\n")
-    print_debug("activation $activation\n")
-    print_debug("F_m $F_m\n")
+    print_debug("calcMuscleVelocity ")
+    print_debug("y $y ")
+    print_debug("activation $activation ")
+    print_debug("F_m $F_m ")
     print_debug("L_m $L_m\n")
     V_m = model.V_max*norm_inv_fv(y)
     return V_m
@@ -205,16 +206,16 @@ function calcFmdotnew(model::HillMuscleModel, V_m, V_mt)
     V_t = V_mt - V_m
     F_mdot = V_t*model.K_t
 
-    print_debug("calcfmdot")
-    print_debug("V_m $V_m")
-    print_debug("V_mt $V_mt")
-    print_debug("V_t $V_t")
-    print_debug("F_mdot $F_mdot")
+    print_debug("calcfmdot ")
+    print_debug("V_m $V_m ")
+    print_debug("V_mt $V_mt ")
+    print_debug("V_t $V_t ")
+    print_debug("F_mdot $F_mdot\n")
     return F_mdot
 end
 
 function calcV_mtExternal(external_model::HillExternalModel, model::HillMuscleModel, F_mdot)
-    V_mt = -F_mdot/external_model.K_load
+    V_mt = F_mdot/external_model.K_load # TODO: SHOULD THIS BE NEGATIVE?
     return V_mt
 end
 
@@ -238,7 +239,7 @@ function gen_activation!(model::HillMuscleModel)
         collect(Iterators.take(model.activation, length(model.time)))
 end
 
-function simulate(model::HillMuscleModel)
+function simulate(model::HillMuscleModel, external_model::HillExternalModel)
 
     #F_m_dot = (t, F_m) -> calcF_mdot(model, t, F_m)
 
@@ -248,21 +249,41 @@ function simulate(model::HillMuscleModel)
             vcat(acc, js.RK4(acc[end], F_m_dot, t, model.dt)), model.time)
         =#
 
-    model.L_mt[1] = model.L_mt_init
+
+    initial_value_outputs = HillModelOutputs(
+        zeros(length_time), #L_mt
+        zeros(length_time), #V_mt
+
+        zeros(length_time), #F_m
+        zeros(length_time), #F_mdot
+        zeros(length_time), #L_m
+        zeros(length_time), #V_m
+
+        zeros(length_time), #V_t
+        zeros(length_time), #L_t
+
+        zeros(length_time), #activation
+        zeros(length_time), #excitation
+
+        zeros(length_time) #time
+        )
+
+    initial_value_outputs.L_mt[1] = model.L_mt_init
 
     # take initial stab at calculating F_m
     temp_force = collect(0:0.01:2)
     temp_vel = map(norm_inv_fv, temp_force)
     FV = js.interp(temp_vel, temp_force, 0.0)
-    activation = interp_activation(model, model.time[1])
+    initial_value_outputs.activation[1] = model.activ_lower_bound
 
-    model.F_m[1] =
-        model.F_max * activation * norm_length_tension((model.L_mt[1] - model.L_st)/model.L_max)*FV
+    initial_value_outputsmodel.F_m[1] =
+        model.F_max * activation * norm_length_tension((initial_value_outputsmodel.L_mt[1] - model.L_st)/model.L_max)*FV
 
     model.V_mt[1] = 0.0
 
     for i in 1:length(model.time)-1
-    model.F_m[i+1] = js.RK4(model.F_m[i], (t, F_m) -> calcF_mdot(model, t, F_m, model.V_mt[i]), model.time[i], model.dt)
+    initial_value_outputs.F_m[i+1] = 
+        js.RK4(initial_value_outputs.F_m[i], (t, F_m) -> calcF_mdot(model, t, F_m, model.V_mt[i]), model.time[i], model.dt)
 
     model.V_mt[i+1] = calcF_mdot(model, model.time[i], model.F_m[i], model.V_mt[i])/model.K_sp
 
@@ -439,7 +460,7 @@ function simulateStep(model::HillMuscleModel, external_model::HillExternalModel,
         model.dt)
 
     F_m = outputs.F_m[iteration + 1]
-    print_debug("\nFinal Fm $F_m ")
+    print_debug("\nFinal Fm $F_m \n")
 
     outputs.L_t[iteration + 1] = calcL_t(model, outputs.F_m[iteration])
     outputs.L_m[iteration + 1] = outputs.L_mt[iteration] - outputs.L_t[iteration]
