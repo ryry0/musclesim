@@ -57,6 +57,7 @@ type HillModelOutputs
     L_t::Vector{Float64} #
 
     activation::Vector{Float64} #
+    activation_dot::Vector{Float64}
     excitation::Vector{Float64} #
 
     time::Vector{Float64}
@@ -263,6 +264,7 @@ function simulate(model::HillMuscleModel, external_model::HillExternalModel)
         zeros(length_time), #L_t
 
         zeros(length_time), #activation
+        zeros(length_time), #activation_dot
         zeros(length_time), #excitation
 
         zeros(length_time) #time
@@ -313,6 +315,7 @@ initial_value_outputs = HillModelOutputs(
     zeros(length_time), #L_t
 
     zeros(length_time), #activation
+    zeros(length_time), #activation_dot
     zeros(length_time), #excitation
 
     zeros(length_time) #time
@@ -392,6 +395,124 @@ function loopSimulation(model::HillMuscleModel, external_model::HillExternalMode
     end
 end
 
+
+function loopSimulationAB(model::HillMuscleModel, external_model::HillExternalModel, outputs::HillModelOutputs)
+    time = model.start_time
+    iteration = 1
+
+    for i in 1:4
+        outputs.time[iteration] = time
+        simulateStep(model, external_model, outputs, iteration, time)
+
+        time += model.dt
+        iteration += 1
+    end
+
+    while time < model.end_time - model.dt
+
+# calculate iteration + 1 values
+        outputs.time[iteration] = time
+        simulateStepAB(model, external_model, outputs, iteration, time)
+
+        time += model.dt
+        iteration += 1
+    end
+end
+
+function calcActivationAB(model::HillMuscleModel, previous_value, previous_adot, t)
+#### based on excitation, calculate the next activation
+# calculate current excitation
+
+    a_dot = # Create anonymous function for activation.
+        (t, a) ->
+            audot(t, model.excitation_func, a, tau=model.tau, beta=model.beta)
+
+    activation = # integrate to form activation
+            js.adams_bashforth_moulton(previous_value, previous_adot, a_dot, t, model.dt)
+
+    activation = js.constrain(activation, model.activ_lower_bound, model.activ_upper_bound)
+
+    return (activation, a_dot(t, previous_value))
+end
+
+function simulateStepAB(model::HillMuscleModel, external_model::HillExternalModel,
+    outputs::HillModelOutputs, iteration, time)
+
+#### based on excitation, calculate the next activation
+# calculate current excitation
+
+    outputs.excitation[iteration] = model.excitation_func(time)
+
+    if iteration == 1
+        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) = 
+        calcActivation(model,
+            js.constrain(model.excitation_func(time), model.activ_lower_bound, model.activ_upper_bound), time)
+    else
+        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) = 
+        calcActivation(model, outputs.activation[iteration], time)
+    end
+
+#=
+ use the activation to calculate the next muscle model state
+ this includes:
+ F_m = F_t -
+ F_mdot = F_tdot -
+ V_m -
+ V_t -
+ L_t -
+ L_m -
+ =#
+
+    print_debug("\nactual calc ")
+    outputs.V_m[iteration + 1] =
+        calcMuscleVelocity(model,
+            outputs.activation[iteration], outputs.F_m[iteration], outputs.L_m[iteration])
+
+    outputs.F_mdot[iteration + 1] = calcFmdotnew(model, outputs.V_m[iteration], outputs.V_mt[iteration])
+
+    outputs.V_t[iteration + 1] = outputs.V_mt[iteration] - outputs.V_m[iteration]
+
+    slope = (outputs.activation[iteration + 1] - outputs.activation[iteration])/model.dt
+    interpolate_activation = t -> slope*t + outputs.activation[iteration] - slope*time
+
+    print_debug("\nintegral calc ")
+    outputs.F_m[iteration + 1] = js.RK4(
+        outputs.F_m[iteration],
+        (t, u) -> calcFmdotnew(
+                    model,
+                    calcMuscleVelocity(
+                        model,
+                        interpolate_activation(t),
+                        u,
+                        outputs.L_m[iteration]),
+                    outputs.V_mt[iteration]),
+        time,
+        model.dt)
+
+    F_m = outputs.F_m[iteration + 1]
+    print_debug("\nFinal Fm $F_m \n")
+
+    outputs.L_t[iteration + 1] = calcL_t(model, outputs.F_m[iteration])
+    outputs.L_m[iteration + 1] = outputs.L_mt[iteration] - outputs.L_t[iteration]
+
+#=
+ interact with the outside world, calculating:
+ L_mt
+ V_mt
+=#
+
+    outputs.V_mt[iteration + 1] = 
+        #0
+        #calcV_mtExternal(external_model, model, outputs.F_mdot[iteration])
+        calcvmt(model, time)
+
+    outputs.L_mt[iteration + 1] = 
+        #model.L_mt_initial 
+        #calcL_mtExternal(external_model, model, outputs.F_m[iteration])
+        calclmt(model, time)
+
+end
+
 function calcActivation(model::HillMuscleModel, previous_value, t)
 #### based on excitation, calculate the next activation
 # calculate current excitation
@@ -405,7 +526,7 @@ function calcActivation(model::HillMuscleModel, previous_value, t)
 
     activation = js.constrain(activation, model.activ_lower_bound, model.activ_upper_bound)
 
-    return activation
+    return (activation, a_dot(t, previous_value))
 end
 
 function simulateStep(model::HillMuscleModel, external_model::HillExternalModel,
@@ -417,10 +538,12 @@ function simulateStep(model::HillMuscleModel, external_model::HillExternalModel,
     outputs.excitation[iteration] = model.excitation_func(time)
 
     if iteration == 1
-        outputs.activation[iteration + 1] = calcActivation(model,
-            js.constrain(model.excitation_func(time), model.activ_lower_bound, model.activ_upper_bound), time)
+        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) = 
+            calcActivation(model,
+                js.constrain(model.excitation_func(time), model.activ_lower_bound, model.activ_upper_bound), time)
     else
-        outputs.activation[iteration + 1] = calcActivation(model, outputs.activation[iteration], time)
+        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) = 
+            calcActivation(model, outputs.activation[iteration], time)
     end
 
 #=
