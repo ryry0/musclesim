@@ -29,9 +29,9 @@ function fftplot(X; sampling_freq=Fs)
     P2 = abs(Y/L)
     P1 = P2[1:div(L,2)+1]
     P1[2:end - 1] = 2*P1[2:end-1]
-    
+
     freq = sampling_freq*collect(0:(L/2))/L
-    
+
     subplot(2,1,1)
     plot(t,X)
     title("Time domain")
@@ -82,26 +82,26 @@ end
 function smooth(arr, num_point=5)
     if num_point % 2 == 0
         println("num_point must be odd")
-        return 
+        return
     end
-        
+
     b = zeros(size(arr))
     span = div(num_point, 2)
     start, finish = 1, length(arr)
-    
+
     for i in 1:length(arr)
         n = 0
-        
+
         inspan = i-span < start ? i-start : span
         inspan = i+span > finish ? finish-i : inspan
-        
+
         #println("start ", start, " finish ", finish, " i ", i, " inspan ", inspan)
         for j in max(start, i-inspan):min(finish, i+inspan)
             #println("j", j, " arr ", arr[j])
             b[i] += arr[j]
             n+=1
         end
-        
+
         b[i]/=n
     end
     return b
@@ -113,7 +113,7 @@ function windowsinc(input_arr, fc, kernel_length::Integer)
     if kernel_length % 2 == 0
         println("num_point must be odd")
         #only applies to 1 indexed languages
-        return 
+        return
     end
     #Set the cutoff frequency (between 0 and 0.5 relative to sampling freq)
     #kernel_length = 4/BW
@@ -126,7 +126,7 @@ function windowsinc(input_arr, fc, kernel_length::Integer)
 
     kernel_length_half = div(kernel_length+1, 2)
     for i in 1:kernel_length
-            if (i-kernel_length_half) == 0 
+            if (i-kernel_length_half) == 0
                     kernel[i] = 2*pi*fc
             else
                     kernel[i] = sin(2*pi*fc * (i-kernel_length_half)) / (i-kernel_length_half)
@@ -140,7 +140,7 @@ function windowsinc(input_arr, fc, kernel_length::Integer)
     kernel = kernel ./ kernel_sum
 
     #Convolve the input signal & filter kernel
-    for j in kernel_length+1:length(input) 
+    for j in kernel_length+1:length(input)
             for i in 1:kernel_length
                     output[j] += input[j-i] * kernel[i]
             end
@@ -156,7 +156,7 @@ function windowsinchp(input_arr, fc, kernel_length::Integer)
     if kernel_length % 2 == 0
         println("num_point must be odd")
         #only applies to 1 indexed languages
-        return 
+        return
     end
     #Set the cutoff frequency (between 0 and 0.5 relative to sampling freq)
     #kernel_length = 4/BW
@@ -169,7 +169,7 @@ function windowsinchp(input_arr, fc, kernel_length::Integer)
 
     kernel_length_half = div(kernel_length+1, 2)
     for i in 1:kernel_length
-            if (i-kernel_length_half) == 0 
+            if (i-kernel_length_half) == 0
                     kernel[i] = 2*pi*fc
             else
                     kernel[i] = sin(2*pi*fc * (i-kernel_length_half)) / (i-kernel_length_half)
@@ -184,15 +184,15 @@ function windowsinchp(input_arr, fc, kernel_length::Integer)
 
     kernel = kernel .* -1
     kernel[kernel_length_half] += 1
-    
+
     #Convolve the input signal & filter kernel
-    for j in kernel_length+1:length(input) 
+    for j in kernel_length+1:length(input)
             for i in 1:kernel_length
                     output[j] += input[j-i] * kernel[i]
             end
     end
     return output[kernel_length+1:end]
-end 
+end
 
 function findpeaks(x, tolerance=0.0001)
     peaks = []
@@ -268,7 +268,7 @@ function constrain(a::Float64, lower_bound::Float64, upper_bound::Float64)
     if a < lower_bound
         return lower_bound
     end
-        
+
     return a
 end
 
