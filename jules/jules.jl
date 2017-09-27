@@ -252,8 +252,8 @@ end
 
 function adams_bashforth_moulton(u::Float64, prev_du::Vector{Float64}, du, t::Float64, dt::Float64)
         f_k = du(t, u)
-        predictor =  u + dt/24 * (-9*prev_u[end-2] + 37*prev_u[end-1] - 59*prev_du[end] + 55*f_k)
-        corrector = u + dt/24 * (prev_u[end-1] - 4*prev_u[end] + 19*f_k + 9*du(t+dt, predictor))
+        predictor =  u + dt/24 * (-9*prev_du[end-2] + 37*prev_du[end-1] - 59*prev_du[end] + 55*f_k)
+        corrector = u + dt/24 * (prev_du[end-1] - 4*prev_du[end] + 19*f_k + 9*du(t+dt, predictor))
         return corrector
 end
 
