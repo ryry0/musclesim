@@ -2,7 +2,7 @@ module MuscleSim
 include("jules/Jules.jl")
 js = Jules
 
-allow_debug = true
+allow_debug = false
 
 function print_debug(message)
     if allow_debug
@@ -64,7 +64,7 @@ end
 
 function CreateModel(;start_time = 0.0, end_time = 0.0, dt = 0.0, tau = 0.0, beta = 0.0, V_max = 0.0, F_max = 0.0,
                      L_optimal = 0.0, K_t = 0.0, K_sp = 0.0, L_st = 0.0, L_load = 0.0, L_mt_initial = 0.0,
-                     L_total = 0.0, excitation_func = excite, activ_lower_bound = 0.01, activ_upper_bound = 1.0)
+                     L_total = 0.0, excitation_func = excite, activ_lower_bound = 0.1, activ_upper_bound = 1.0)
 
     model = HillMuscleModel(
         start_time,
@@ -105,7 +105,7 @@ end
 
 function excite(t::Float64)
     T0 = 0.5
-    T1 = 2
+    T1 = 6
     HIGH = 0.5
     LOW = 0.01
     ret = 0
@@ -215,7 +215,7 @@ function calcFmdotnew(model::HillMuscleModel, V_m, V_mt)
 end
 
 function calcV_mtExternal(external_model::HillExternalModel, model::HillMuscleModel, F_mdot)
-    V_mt = F_mdot/external_model.K_load # TODO: SHOULD THIS BE NEGATIVE?
+    V_mt = -F_mdot/external_model.K_load # TODO: SHOULD THIS BE NEGATIVE?
     return V_mt
 end
 
@@ -318,10 +318,13 @@ initial_value_outputs = HillModelOutputs(
     zeros(length_time) #time
     )
 
+    temp_excitation = model.excitation_func
+    model.excitation_func = temp_excitation # t -> 0.1
+
     initial_value_outputs.L_mt[1] = model.L_mt_initial
     initial_value_outputs.L_t[1] = model.L_st
     initial_value_outputs.L_m[1] = model.L_mt_initial - model.L_st
-    initial_value_outputs.activation[1] = model.activ_lower_bound
+    initial_value_outputs.activation[1] = js.constrain(model.excitation_func(model.start_time), model.activ_lower_bound, model.activ_upper_bound)
 
 
     # take initial stab at calculating F_m
@@ -338,8 +341,6 @@ initial_value_outputs = HillModelOutputs(
     print_debug("L_m $(initial_value_outputs.L_m[1])\n")
     print_debug("L_mt $(initial_value_outputs.L_mt[1])\n")
 
-    temp_excitation = model.excitation_func
-    #model.excitation_func = zero_excite
 
 # with low activation, simulate for a while to get initial F_m
     loopSimulation(model, external_model, initial_value_outputs)
@@ -471,7 +472,40 @@ function simulateStep(model::HillMuscleModel, external_model::HillExternalModel,
  V_mt
 =#
 
-    outputs.V_mt[iteration + 1] = calcV_mtExternal(external_model, model, outputs.F_mdot[iteration])
-    outputs.L_mt[iteration + 1] = calcL_mtExternal(external_model, model, outputs.F_m[iteration])
+    outputs.V_mt[iteration + 1] = 
+        #0
+        #calcV_mtExternal(external_model, model, outputs.F_mdot[iteration])
+        calcvmt(model, time)
+
+    outputs.L_mt[iteration + 1] = 
+        #model.L_mt_initial 
+        #calcL_mtExternal(external_model, model, outputs.F_m[iteration])
+        calclmt(model, time)
+
 end
+
+delay = 2
+end_ramp = 3
+slope = -0.5*10.0^-2
+
+function calclmt(model, time)
+    if time < delay
+        return model.L_mt_initial
+    end
+
+    if time < end_ramp
+        return model.L_mt_initial +  (time - delay)*slope
+    end
+
+    return model.L_mt_initial + (end_ramp - delay) * slope
+end
+
+function calcvmt(model, time)
+    if (time > delay) && (time < end_ramp)
+        return slope
+    end
+    return 0.0
+end
+
+
 end
