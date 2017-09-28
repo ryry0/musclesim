@@ -105,7 +105,7 @@ function zero_excite(t::Float64)
 end
 
 function excite(t::Float64)
-    T0 = 0.5
+    T0 = 1
     T1 = 6
     HIGH = 0.5
     LOW = 0.01
@@ -284,7 +284,7 @@ function simulate(model::HillMuscleModel, external_model::HillExternalModel)
     model.V_mt[1] = 0.0
 
     for i in 1:length(model.time)-1
-    initial_value_outputs.F_m[i+1] = 
+    initial_value_outputs.F_m[i+1] =
         js.RK4(initial_value_outputs.F_m[i], (t, F_m) -> calcF_mdot(model, t, F_m, model.V_mt[i]), model.time[i], model.dt)
 
     model.V_mt[i+1] = calcF_mdot(model, model.time[i], model.F_m[i], model.V_mt[i])/model.K_sp
@@ -346,8 +346,7 @@ initial_value_outputs = HillModelOutputs(
 
 
 # with low activation, simulate for a while to get initial F_m
-    loopSimulation(model, external_model, initial_value_outputs)
-
+    loopSimulationAB(model, external_model, initial_value_outputs)
 
 #=
 # the main simulation
@@ -444,11 +443,11 @@ function simulateStepAB(model::HillMuscleModel, external_model::HillExternalMode
     outputs.excitation[iteration] = model.excitation_func(time)
 
     if iteration == 1
-        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) = 
+        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) =
         calcActivation(model,
             js.constrain(model.excitation_func(time), model.activ_lower_bound, model.activ_upper_bound), time)
     else
-        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) = 
+        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) =
         calcActivation(model, outputs.activation[iteration], time)
     end
 
@@ -476,8 +475,9 @@ function simulateStepAB(model::HillMuscleModel, external_model::HillExternalMode
     interpolate_activation = t -> slope*t + outputs.activation[iteration] - slope*time
 
     print_debug("\nintegral calc ")
-    outputs.F_m[iteration + 1] = js.RK4(
+    outputs.F_m[iteration + 1] = js.adams_bashforth_moulton(
         outputs.F_m[iteration],
+        outputs.F_mdot,
         (t, u) -> calcFmdotnew(
                     model,
                     calcMuscleVelocity(
@@ -492,25 +492,14 @@ function simulateStepAB(model::HillMuscleModel, external_model::HillExternalMode
     F_m = outputs.F_m[iteration + 1]
     print_debug("\nFinal Fm $F_m \n")
 
-    outputs.L_t[iteration + 1] = calcL_t(model, outputs.F_m[iteration])
-    outputs.L_m[iteration + 1] = outputs.L_mt[iteration] - outputs.L_t[iteration]
+    calcLengths(model, external_model, outputs, iteration, time)
 
 #=
  interact with the outside world, calculating:
  L_mt
  V_mt
 =#
-
-    outputs.V_mt[iteration + 1] = 
-        #0
-        #calcV_mtExternal(external_model, model, outputs.F_mdot[iteration])
-        calcvmt(model, time)
-
-    outputs.L_mt[iteration + 1] = 
-        #model.L_mt_initial 
-        #calcL_mtExternal(external_model, model, outputs.F_m[iteration])
-        calclmt(model, time)
-
+    calcExternal(model, external_model, outputs, iteration, time)
 end
 
 function calcActivation(model::HillMuscleModel, previous_value, t)
@@ -538,11 +527,11 @@ function simulateStep(model::HillMuscleModel, external_model::HillExternalModel,
     outputs.excitation[iteration] = model.excitation_func(time)
 
     if iteration == 1
-        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) = 
+        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) =
             calcActivation(model,
                 js.constrain(model.excitation_func(time), model.activ_lower_bound, model.activ_upper_bound), time)
     else
-        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) = 
+        (outputs.activation[iteration + 1], outputs.activation_dot[iteration + 1]) =
             calcActivation(model, outputs.activation[iteration], time)
     end
 
@@ -586,24 +575,36 @@ function simulateStep(model::HillMuscleModel, external_model::HillExternalModel,
     F_m = outputs.F_m[iteration + 1]
     print_debug("\nFinal Fm $F_m \n")
 
-    outputs.L_t[iteration + 1] = calcL_t(model, outputs.F_m[iteration])
-    outputs.L_m[iteration + 1] = outputs.L_mt[iteration] - outputs.L_t[iteration]
-
+    calcLengths(model, external_model, outputs, iteration, time)
 #=
  interact with the outside world, calculating:
  L_mt
  V_mt
 =#
+    calcExternal(model, external_model, outputs, iteration, time)
+end
 
-    outputs.V_mt[iteration + 1] = 
-        #0
+function calcLengths(model, external_model, outputs, iteration, time)
+
+    outputs.L_t[iteration + 1] = calcL_t(model, outputs.F_m[iteration])
+    Keq = external_model.K_load * model.K_t/(external_model.K_load + model.K_t)
+    outputs.L_m[iteration + 1] = 
+        #external_model.L_total - (Keq * outputs.F_m[iteration] + model.L_st + external_model.L_load)
+        outputs.L_mt[iteration] - outputs.L_t[iteration]
+
+end
+
+function calcExternal(model, external_model, outputs, iteration, time)
+
+    outputs.V_mt[iteration + 1] =
+        0
         #calcV_mtExternal(external_model, model, outputs.F_mdot[iteration])
-        calcvmt(model, time)
+        #calcvmt(model, time)
 
-    outputs.L_mt[iteration + 1] = 
-        #model.L_mt_initial 
+    outputs.L_mt[iteration + 1] =
+        model.L_mt_initial
         #calcL_mtExternal(external_model, model, outputs.F_m[iteration])
-        calclmt(model, time)
+        #calclmt(model, time)
 
 end
 
