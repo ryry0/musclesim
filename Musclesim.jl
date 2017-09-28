@@ -222,6 +222,9 @@ end
 
 function calcL_mtExternal(external_model::HillExternalModel, model::HillMuscleModel, F_m)
     L_mt = external_model.L_total - (F_m/external_model.K_load + external_model.L_load)
+    if (F_m/external_model.K_load + external_model.L_load) > external_model.L_total
+        print("$F_m\n")
+    end
     return L_mt
 end
 
@@ -489,6 +492,8 @@ function simulateStepAB(model::HillMuscleModel, external_model::HillExternalMode
         time,
         model.dt)
 
+    outputs.F_m[iteration + 1] = js.constrain(outputs.F_m[iteration + 1], 0.0, model.F_max) #outputs.F_m[iteration + 1])
+
     F_m = outputs.F_m[iteration + 1]
     print_debug("\nFinal Fm $F_m \n")
 
@@ -572,6 +577,7 @@ function simulateStep(model::HillMuscleModel, external_model::HillExternalModel,
         time,
         model.dt)
 
+    outputs.F_m[iteration + 1] = js.constrain(outputs.F_m[iteration + 1], 0.0, outputs.F_m[iteration + 1])
     F_m = outputs.F_m[iteration + 1]
     print_debug("\nFinal Fm $F_m \n")
 
@@ -589,28 +595,28 @@ function calcLengths(model, external_model, outputs, iteration, time)
     outputs.L_t[iteration + 1] = calcL_t(model, outputs.F_m[iteration])
     Keq = external_model.K_load * model.K_t/(external_model.K_load + model.K_t)
     outputs.L_m[iteration + 1] = 
-        #external_model.L_total - (Keq * outputs.F_m[iteration] + model.L_st + external_model.L_load)
         outputs.L_mt[iteration] - outputs.L_t[iteration]
+        #external_model.L_total - (Keq * outputs.F_m[iteration] + model.L_st + external_model.L_load)
 
 end
 
 function calcExternal(model, external_model, outputs, iteration, time)
 
     outputs.V_mt[iteration + 1] =
-        0
-        #calcV_mtExternal(external_model, model, outputs.F_mdot[iteration])
+        #0
+        calcV_mtExternal(external_model, model, outputs.F_mdot[iteration])
         #calcvmt(model, time)
 
     outputs.L_mt[iteration + 1] =
-        model.L_mt_initial
-        #calcL_mtExternal(external_model, model, outputs.F_m[iteration])
+        #model.L_mt_initial
+        calcL_mtExternal(external_model, model, outputs.F_m[iteration])
         #calclmt(model, time)
 
 end
 
 delay = 2
-end_ramp = 3
-slope = -0.5*10.0^-2
+end_ramp = 4
+slope = 0.5*10.0^-2
 
 function calclmt(model, time)
     if time < delay
